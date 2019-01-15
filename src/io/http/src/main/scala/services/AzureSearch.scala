@@ -161,6 +161,9 @@ object AzureSearchWriter extends IndexParser {
 
     SearchIndex.createIfNoneExists(subscriptionKey,serviceName, indexJson, apiVersion)
 
+    println("checking schema parity")
+    println(checkSchemaParity(df, indexJson))
+
     checkSchemaParity(df, indexJson) match {
       case Success(_) => ()
       case Failure(e) =>
@@ -190,7 +193,7 @@ object AzureSearchWriter extends IndexParser {
     val fieldTypes = parseIndexJson(indexJson).fields.map(f => f.`type`).toList.map(t => edmTypes(t.toString))
 
     // drop the first comparison element because the first field in the dataframe corresponds to the search action
-    val isValid = df.schema.toList.drop(1).map(field =>
+    val isValid = df.schema.toList.dropRight(1).map(field =>
         fieldNames.contains(field.name) && fieldTypes.contains(field.dataType.simpleString)
       )
 
