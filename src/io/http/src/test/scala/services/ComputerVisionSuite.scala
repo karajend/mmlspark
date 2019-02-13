@@ -6,10 +6,8 @@ package com.microsoft.ml.spark
 import com.microsoft.ml.spark.cognitive.AIResponse
 import org.apache.spark.ml.NamespaceInjections.pipelineModel
 import org.apache.spark.ml.util.MLReadable
-import org.apache.spark.sql.{DataFrame, Dataset}
+import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.scalactic.Equality
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.functions.{col, explode, struct}
 import org.scalatest.Assertion
 
 trait VisionKey {
@@ -19,7 +17,6 @@ trait VisionKey {
 class OCRSuite extends TransformerFuzzing[OCR] with VisionKey {
 
   import session.implicits._
-  import com.microsoft.ml.spark.FluentAPI._
 
   lazy val df: DataFrame = Seq(
     "https://mmlspark.blob.core.windows.net/datasets/OCR/test1.jpg",
@@ -27,7 +24,7 @@ class OCRSuite extends TransformerFuzzing[OCR] with VisionKey {
     "https://mmlspark.blob.core.windows.net/datasets/OCR/test3.png"
   ).toDF("url")
 
-  lazy val ocr =  new OCR()
+  lazy val ocr = new OCR()
     .setSubscriptionKey(visionKey)
     .setLocation("eastus")
     .setDefaultLanguage("en")
@@ -35,12 +32,35 @@ class OCRSuite extends TransformerFuzzing[OCR] with VisionKey {
     .setDetectOrientation(true)
     .setOutputCol("ocr")
 
-  test("Basic Usage") {
+  lazy val bytesDF: DataFrame = BingImageSearch
+    .downloadFromUrls("url", "imageBytes", 4, 10000)
+    .transform(df)
+    .select("imageBytes")
+
+  lazy val bytesOCR = new OCR()
+    .setSubscriptionKey(visionKey)
+    .setLocation("eastus")
+    .setDefaultLanguage("en")
+    .setImageBytesCol("imageBytes")
+    .setDetectOrientation(true)
+    .setOutputCol("bocr")
+
+  test("Basic Usage with URL") {
     val model = pipelineModel(Array(
       ocr,
       OCR.flatten("ocr", "ocr")
     ))
     val results = model.transform(df).collect()
+    assert(results(2).getString(2).startsWith("This is a lot of 12 point text"))
+  }
+
+  test("Basic Usage with Bytes") {
+    val model = pipelineModel(Array(
+      bytesOCR,
+      OCR.flatten("bocr", "bocr")
+    ))
+
+    val results = model.transform(bytesDF).collect()
     assert(results(2).getString(2).startsWith("This is a lot of 12 point text"))
   }
 
@@ -60,18 +80,43 @@ class AnalyzeImageSuite extends TransformerFuzzing[AnalyzeImage] with VisionKey 
     ("https://mmlspark.blob.core.windows.net/datasets/OCR/test3.png", "en")
   ).toDF("url", "language")
 
-  lazy val ai: AnalyzeImage =  new AnalyzeImage()
+  lazy val ai: AnalyzeImage = new AnalyzeImage()
     .setSubscriptionKey(visionKey)
     .setLocation("eastus")
     .setImageUrlCol("url")
     .setLanguageCol("language")
     .setDefaultLanguage("en")
     .setVisualFeatures(
-        Seq("Categories", "Tags", "Description", "Faces", "ImageType", "Color", "Adult"))
+      Seq("Categories", "Tags", "Description", "Faces", "ImageType", "Color", "Adult"))
     .setDetails(Seq("Celebrities", "Landmarks"))
     .setOutputCol("features")
 
-  test("Basic Usage") {
+  lazy val bytesDF: DataFrame = BingImageSearch
+    .downloadFromUrls("url", "imageBytes", 4, 10000)
+    .transform(df)
+    .drop("url")
+
+  lazy val bytesAI: AnalyzeImage = new AnalyzeImage()
+    .setSubscriptionKey(visionKey)
+    .setLocation("eastus")
+    .setImageBytesCol("imageBytes")
+    .setLanguageCol("language")
+    .setDefaultLanguage("en")
+    .setVisualFeatures(
+      Seq("Categories", "Tags", "Description", "Faces", "ImageType", "Color", "Adult")
+    )
+    .setDetails(Seq("Celebrities", "Landmarks"))
+    .setOutputCol("features")
+
+  test("Basic Usage with URL") {
+    val fromRow = AIResponse.makeFromRowConverter
+    val responses = ai.transform(df).select("features")
+      .collect().toList.map(r => fromRow(r.getStruct(0)))
+    assert(responses.head.categories.get.head.name === "others_")
+    assert(responses(1).categories.get.head.name === "text_sign")
+  }
+
+  test("Basic Usage with Bytes") {
     val fromRow = AIResponse.makeFromRowConverter
     val responses = ai.transform(df).select("features")
       .collect().toList.map(r => fromRow(r.getStruct(0)))
@@ -84,9 +129,9 @@ class AnalyzeImageSuite extends TransformerFuzzing[AnalyzeImage] with VisionKey 
 
   override def reader: MLReadable[_] = AnalyzeImage
 
-  override implicit lazy val dfEq: Equality[DataFrame] = new Equality[DataFrame]{
+  override implicit lazy val dfEq: Equality[DataFrame] = new Equality[DataFrame] {
     def areEqual(a: DataFrame, bAny: Any): Boolean = bAny match {
-      case b:Dataset[_] =>
+      case b: Dataset[_] =>
         baseDfEq.areEqual(
           a.select("features.*").drop("requestId"),
           b.select("features.*").drop("requestId"))
@@ -97,8 +142,8 @@ class AnalyzeImageSuite extends TransformerFuzzing[AnalyzeImage] with VisionKey 
 
 class RecognizeTextSuite extends TransformerFuzzing[RecognizeText] with VisionKey {
 
-  import session.implicits._
   import com.microsoft.ml.spark.FluentAPI._
+  import session.implicits._
 
   lazy val df: DataFrame = Seq(
     "https://mmlspark.blob.core.windows.net/datasets/OCR/test1.jpg",
@@ -106,7 +151,7 @@ class RecognizeTextSuite extends TransformerFuzzing[RecognizeText] with VisionKe
     "https://mmlspark.blob.core.windows.net/datasets/OCR/test3.png"
   ).toDF("url")
 
-  lazy val rt: RecognizeText =  new RecognizeText()
+  lazy val rt: RecognizeText = new RecognizeText()
     .setSubscriptionKey(visionKey)
     .setLocation("eastus")
     .setImageUrlCol("url")
@@ -151,9 +196,9 @@ class RecognizeDomainSpecificContentSuite extends TransformerFuzzing[RecognizeDo
     assert(results.head().getString(2) === "Leonardo DiCaprio")
   }
 
-  override implicit lazy val dfEq: Equality[DataFrame] = new Equality[DataFrame]{
+  override implicit lazy val dfEq: Equality[DataFrame] = new Equality[DataFrame] {
     def areEqual(a: DataFrame, bAny: Any): Boolean = bAny match {
-      case b:Dataset[_] =>
+      case b: Dataset[_] =>
         val t = RecognizeDomainSpecificContent.getMostProbableCeleb("celebs", "celebs")
         baseDfEq.areEqual(t.transform(a), t.transform(b))
     }
@@ -216,7 +261,7 @@ class TagImageSuite extends TransformerFuzzing[TagImage] with VisionKey {
   }
 
   override def assertDFEq(df1: DataFrame, df2: DataFrame)(implicit eq: Equality[DataFrame]): Assertion = {
-    super.assertDFEq(df1.select("tags.tags"),df2.select("tags.tags"))(eq)
+    super.assertDFEq(df1.select("tags.tags"), df2.select("tags.tags"))(eq)
   }
 
   override def testObjects(): Seq[TestObject[TagImage]] =

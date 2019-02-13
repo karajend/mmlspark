@@ -172,7 +172,7 @@ abstract class TextAnalyticsBase(override val uid: String) extends CognitiveServ
 }
 
 trait HasLanguage extends HasServiceParams {
-  val language = new ServiceParam[String](this, "language", "the language to use")
+  val language = new ServiceParam[String](this, "language", "the language to use", isURLParam = true)
 
   def setLanguageCol(v: String): this.type = setVectorParam(language, v)
 
@@ -223,12 +223,24 @@ class EntityDetector(override val uid: String)
 
 object NER extends ComplexParamsReadable[NER]
 
-class NER(override val uid: String)
-  extends TextAnalyticsBase(uid) {
+class NER(override val uid: String) extends TextAnalyticsBase(uid) {
 
   def this() = this(Identifiable.randomUID("NER"))
 
   override def responseDataType: StructType = NERResponse.schema
+
+  def setLocation(v: String): this.type =
+    setUrl(s"https://$v.api.cognitive.microsoft.com/text/analytics/v2.1-preview/entities")
+}
+
+object LocalNER extends ComplexParamsReadable[LocalNER]
+
+class LocalNER(override val uid: String)
+  extends TextAnalyticsBase(uid) {
+
+  def this() = this(Identifiable.randomUID("LocalNER"))
+
+  override def responseDataType: StructType = LocalNERResponse.schema
 }
 
 object KeyPhraseExtractor extends ComplexParamsReadable[EntityDetector]
